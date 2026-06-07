@@ -17,6 +17,7 @@ export function ResultScreen({ onBack, onClose }: Props) {
   const recognizedText = useAppStore((s) => s.recognizedText);
   const candidates = useAppStore((s) => s.candidates);
   const capturedImageUrl = useAppStore((s) => s.capturedImageUrl);
+  const ocrError = useAppStore((s) => s.ocrError);
 
   const hasResult = recognizedText.length > 0 || candidates.length > 0;
 
@@ -91,6 +92,11 @@ export function ResultScreen({ onBack, onClose }: Props) {
               <br />
               초점·밝기를 맞춘 뒤 다시 촬영해주세요.
             </p>
+            {ocrError && (
+              <p className="mt-3 break-words rounded-lg bg-slate-900/70 px-3 py-2 text-left font-mono text-[11px] leading-relaxed text-rose-300/80">
+                오류: {ocrError}
+              </p>
+            )}
           </div>
         )}
       </div>

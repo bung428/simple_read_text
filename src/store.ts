@@ -30,6 +30,7 @@ interface AppState {
   candidates: OcrCandidate[]; // 빠른 복사용 자동 감지 항목
   lastCopied: string | null;
   capturedImageUrl: string | null; // 촬영한 이미지 미리보기 (ObjectURL)
+  ocrError: string | null; // OCR 실패 시 진단 메시지
 
   profile: PerfProfile;
   paused: boolean;
@@ -45,6 +46,7 @@ interface AppState {
   setResult: (text: string, candidates: OcrCandidate[]) => void;
   setCopied: (s: string) => void;
   setCapturedImage: (url: string | null) => void;
+  setOcrError: (msg: string | null) => void;
   togglePause: () => void;
   reset: () => void;
 }
@@ -64,6 +66,7 @@ export const useAppStore = create<AppState>((set) => ({
   candidates: [],
   lastCopied: null,
   capturedImageUrl: null,
+  ocrError: null,
 
   profile: detectLowEnd() ? LOW_END_PROFILE : DEFAULT_PROFILE,
   paused: false,
@@ -86,6 +89,7 @@ export const useAppStore = create<AppState>((set) => ({
       }
       return { capturedImageUrl: url };
     }),
+  setOcrError: (ocrError) => set({ ocrError }),
   togglePause: () => set((s) => ({ paused: !s.paused })),
   reset: () =>
     set((s) => {
@@ -98,6 +102,7 @@ export const useAppStore = create<AppState>((set) => ({
         feedback: "idle",
         quality: null,
         capturedImageUrl: null,
+        ocrError: null,
       };
     }),
 }));

@@ -9,6 +9,21 @@ import {
   PADDLE_REC_URL,
 } from "../config";
 
+// ppu-paddle-ocr/web의 WebPlatformProvider는 중간 캔버스를 만들 때
+// document.createElement("canvas")를 호출한다. Web Worker에는 document가
+// 없으므로 OffscreenCanvas를 돌려주는 최소 shim을 주입한다.
+{
+  const g = self as unknown as { document?: unknown };
+  if (typeof g.document === "undefined") {
+    g.document = {
+      createElement: (tag: string) => {
+        if (tag === "canvas") return new OffscreenCanvas(1, 1);
+        throw new Error(`document shim: unsupported <${tag}>`);
+      },
+    };
+  }
+}
+
 let service: PaddleOcrService | null = null;
 let initializing: Promise<void> | null = null;
 
@@ -62,17 +77,16 @@ self.onmessage = async (e: MessageEvent<OcrWorkerRequest>) => {
     try {
       const w = await ensureService();
 
-      // ImageBitmap → OffscreenCanvas → PNG ArrayBuffer (PaddleOcrService 입력)
+      // ImageBitmap → OffscreenCanvas (PaddleOcrService에 캔버스를 직접 입력)
       const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("OffscreenCanvas 2d context 없음");
       ctx.drawImage(bitmap, 0, 0);
       bitmap.close();
 
-      const blob = await canvas.convertToBlob({ type: "image/png" });
-      const buffer = await blob.arrayBuffer();
-
-      const result = await w.recognize(buffer);
+      const result = await w.recognize(
+        canvas as unknown as HTMLCanvasElement
+      );
 
       // 줄별 신뢰도 평균 → 0~100 환산 (없으면 0)
       const lines = "lines" in result ? result.lines.flat() : [];

@@ -58,12 +58,14 @@ export function useScanner(
           // (빈 결과여도 라이브로 되돌리지 않고 리뷰 화면에서 안내)
           const { text, candidates } = parseResult(msg.text, msg.confidence);
           s.setResult(text, candidates);
+          s.setOcrError(null);
           s.setProcessing(false);
           break;
         }
         case "error":
-          // 인식 실패도 리뷰 화면에서 "텍스트 없음"으로 처리
+          // 인식 중 예외 → 리뷰 화면에 실제 메시지를 노출(진단용)
           s.setResult("", []);
+          s.setOcrError(msg.message);
           s.setProcessing(false);
           console.warn("[OCR] error:", msg.message);
           break;
@@ -162,6 +164,7 @@ export function useScanner(
           const st = useAppStore.getState();
           st.setCapturedImage(blob ? URL.createObjectURL(blob) : null);
           st.setResult("", []); // 이전 결과 비우고 인식 대기 상태로
+          st.setOcrError(null);
           st.setProcessing(true);
           st.setPhase("result");
 
