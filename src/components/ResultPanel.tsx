@@ -7,7 +7,6 @@ export function ResultPanel() {
   const recognizedText = useAppStore((s) => s.recognizedText);
   const candidates = useAppStore((s) => s.candidates);
   const setCopied = useAppStore((s) => s.setCopied);
-  const reset = useAppStore((s) => s.reset);
 
   const [toast, setToast] = useState<string | null>(null);
 
@@ -34,16 +33,6 @@ export function ResultPanel() {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between px-1">
-        <span className="text-xs font-medium text-slate-400">인식 결과</span>
-        <button
-          onClick={reset}
-          className="rounded-full px-3 py-1 text-xs text-slate-300 active:bg-slate-700"
-        >
-          지우기
-        </button>
-      </div>
-
       {/* 읽은 전체 텍스트 */}
       {recognizedText && (
         <div className="rounded-2xl bg-slate-800 p-4 shadow-lg ring-1 ring-slate-700">

@@ -3,7 +3,11 @@ import { useAppStore } from "../store";
 import { QualityAnalyzer } from "../utils/quality";
 import { parseResult } from "../utils/parser";
 import { mapRoiToVideo } from "../utils/roi";
-import { MIN_OCR_CONFIDENCE, OCR_LANG } from "../config";
+import {
+  CAPTURE_MIN_CHARS,
+  CAPTURE_MIN_CONFIDENCE,
+  OCR_LANG,
+} from "../config";
 import type { FeedbackKind, OcrWorkerResponse, QualityResult } from "../types";
 
 // 품질 체크용 다운스케일 폭 (작게 -> 빠르고 저전력)
@@ -54,11 +58,16 @@ export function useScanner(
         case "result": {
           s.setProcessing(false);
           const { text, candidates } = parseResult(msg.text, msg.confidence);
-          const hasMeaning = /[0-9A-Za-z가-힣]/.test(text);
-          // 노이즈 프레임 필터: 최소 신뢰도 + 의미 있는 문자 포함
-          if (text && hasMeaning && msg.confidence >= MIN_OCR_CONFIDENCE) {
+          const meaningfulChars = (text.match(/[0-9A-Za-z가-힣]/g) ?? []).length;
+          // 충분히 신뢰할 만한 프레임이면 결과를 확정하고 결과화면으로 이동
+          if (
+            text &&
+            meaningfulChars >= CAPTURE_MIN_CHARS &&
+            msg.confidence >= CAPTURE_MIN_CONFIDENCE
+          ) {
             s.setResult(text, candidates);
             s.setFeedback("found");
+            s.setPhase("result");
           }
           break;
         }

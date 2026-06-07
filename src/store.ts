@@ -12,7 +12,8 @@ export type AppPhase =
   | "requesting" // 카메라 권한 요청 중
   | "denied" // 권한 거부
   | "error" // 카메라/기타 오류
-  | "scanning"; // 카메라 동작 중
+  | "scanning" // 카메라 동작 중
+  | "result"; // 인식 완료 → 결과화면
 
 interface AppState {
   phase: AppPhase;
