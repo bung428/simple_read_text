@@ -43,24 +43,13 @@ export const LOW_END_PROFILE: PerfProfile = {
   roiMaxWidth: 900,
 };
 
-// 일반 텍스트 인식: 한글 + 영어 (+ 숫자/기호).
+// 일반 텍스트 인식: 한글 + 영어 (+ 숫자/기호). whitelist 미사용.
 export const OCR_LANG = "kor+eng";
 
-// --- PaddleOCR (PP-OCRv5) 모델 / 런타임 설정 ---
-// Tesseract 대비 한글·영어 인식률이 높고, 검출(DB)+인식(SVTR) 2단계라
-// 카메라 사진(기울어짐/저대비)에 강하다. onnxruntime-web으로 온디바이스 실행.
-const PADDLE_MODEL_BASE =
-  "https://media.githubusercontent.com/media/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
-const PADDLE_DICT_BASE =
-  "https://raw.githubusercontent.com/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models/refs/heads/main";
-
-export const PADDLE_DET_URL = `${PADDLE_MODEL_BASE}/detection/PP-OCRv5_mobile_det_infer.onnx`;
-export const PADDLE_REC_URL = `${PADDLE_MODEL_BASE}/recognition/multi/korean/v5/korean_PP-OCRv5_mobile_rec_infer.onnx`;
-export const PADDLE_DICT_URL = `${PADDLE_DICT_BASE}/recognition/multi/korean/v5/ppocrv5_korean_dict.txt`;
-
-// onnxruntime-web의 wasm 바이너리 경로 (자체 호스팅 대신 CDN 사용 → 번들 단순화)
-export const ORT_WASM_PATH =
-  "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/";
+// --- Tesseract.js (LSTM) 설정 ---
+// 한국어 정확도가 월등한 LSTM "best" traineddata 사용 (fast 대비 인식률 ↑).
+// 브라우저/Web Worker에서 안정적으로 동작하는 검증된 온디바이스 OCR.
+export const TESS_LANG_PATH = "https://tessdata.projectnaptha.com/4.0.0_best";
 
 // 촬영 후 결과를 채택할 최소 의미 문자 수 (이보다 적으면 인식 실패로 간주)
 export const CAPTURE_MIN_CHARS = 2;

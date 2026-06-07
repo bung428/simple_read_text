@@ -1,63 +1,92 @@
 /// <reference lib="webworker" />
-import * as ort from "onnxruntime-web";
-import { PaddleOcrService } from "ppu-paddle-ocr/web";
+import { createWorker, type Worker as TWorker } from "tesseract.js";
 import type { OcrWorkerRequest, OcrWorkerResponse } from "../types";
-import {
-  ORT_WASM_PATH,
-  PADDLE_DET_URL,
-  PADDLE_DICT_URL,
-  PADDLE_REC_URL,
-} from "../config";
+import { TESS_LANG_PATH } from "../config";
 
-// ppu-paddle-ocr/web의 WebPlatformProvider는 중간 캔버스를 만들 때
-// document.createElement("canvas")를 호출한다. Web Worker에는 document가
-// 없으므로 OffscreenCanvas를 돌려주는 최소 shim을 주입한다.
-{
-  const g = self as unknown as { document?: unknown };
-  if (typeof g.document === "undefined") {
-    g.document = {
-      createElement: (tag: string) => {
-        if (tag === "canvas") return new OffscreenCanvas(1, 1);
-        throw new Error(`document shim: unsupported <${tag}>`);
-      },
-    };
-  }
-}
-
-let service: PaddleOcrService | null = null;
+let tWorker: TWorker | null = null;
 let initializing: Promise<void> | null = null;
+let currentLang = "kor+eng";
 
 function post(msg: OcrWorkerResponse) {
   (self as DedicatedWorkerGlobalScope).postMessage(msg);
 }
 
-async function ensureService(): Promise<PaddleOcrService> {
-  if (service) return service;
+async function ensureWorker(lang: string): Promise<TWorker> {
+  if (tWorker) return tWorker;
+  currentLang = lang;
   if (!initializing) {
     initializing = (async () => {
-      // wasm 바이너리는 CDN에서 로드 (WebGPU 미지원 시 폴백 경로)
-      ort.env.wasm.wasmPaths = ORT_WASM_PATH;
-
-      post({ type: "progress", status: "loading model", progress: 0.3 });
-
-      const s = new PaddleOcrService({
-        model: {
-          detection: PADDLE_DET_URL,
-          recognition: PADDLE_REC_URL,
-          charactersDictionary: PADDLE_DICT_URL,
+      // OEM 1 = LSTM 전용 엔진 (best traineddata와 함께 한글 정확도 최상)
+      const w = await createWorker(lang, 1, {
+        langPath: TESS_LANG_PATH,
+        logger: (m: { status: string; progress: number }) => {
+          post({ type: "progress", status: m.status, progress: m.progress });
         },
-        // 실행 백엔드를 WASM(CPU)으로 고정한다.
-        // 기본값은 ["webgpu","wasm"]라서 WebGPU가 켜진 모바일 브라우저에선
-        // WebGPU로 추론하는데, 모바일 GPU에서 PP-OCRv5 검출/인식이 빈 결과를
-        // 내는 사례가 있다(데스크톱 WASM에선 정상). 정확도/일관성을 위해 WASM 고정.
-        session: { executionProviders: ["wasm"] },
       });
-      await s.initialize();
-      service = s;
+      await w.setParameters({
+        // PSM 3: 자동 페이지 분할 (여러 줄/문단 문서·화면 인식에 적합)
+        tessedit_pageseg_mode: "3" as unknown as never,
+        // 단어 사이 공백 보존 (한글 띄어쓰기 유지)
+        preserve_interword_spaces: "1" as unknown as never,
+      });
+      tWorker = w;
     })();
   }
   await initializing;
-  return service!;
+  return tWorker!;
+}
+
+/**
+ * OCR 전 이미지 전처리.
+ * 그레이스케일 변환 후 2~98 퍼센타일 기준 대비 스트레칭으로
+ * 조명/저대비로 흐려진 글자의 윤곽을 또렷하게 만든다.
+ */
+function preprocess(
+  ctx: OffscreenCanvasRenderingContext2D,
+  w: number,
+  h: number
+) {
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const n = w * h;
+
+  const gray = new Uint8ClampedArray(n);
+  const hist = new Uint32Array(256);
+  for (let i = 0, p = 0; i < n; i++, p += 4) {
+    const g = (0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2]) | 0;
+    gray[i] = g;
+    hist[g]++;
+  }
+
+  // 퍼센타일 클리핑 (밝기 outlier 무시)
+  const loTarget = n * 0.02;
+  const hiTarget = n * 0.98;
+  let acc = 0;
+  let lo = 0;
+  for (let v = 0; v < 256; v++) {
+    acc += hist[v];
+    if (acc >= loTarget) {
+      lo = v;
+      break;
+    }
+  }
+  acc = 0;
+  let hi = 255;
+  for (let v = 0; v < 256; v++) {
+    acc += hist[v];
+    if (acc >= hiTarget) {
+      hi = v;
+      break;
+    }
+  }
+  const range = Math.max(1, hi - lo);
+
+  for (let i = 0, p = 0; i < n; i++, p += 4) {
+    let v = ((gray[i] - lo) / range) * 255;
+    v = v < 0 ? 0 : v > 255 ? 255 : v;
+    d[p] = d[p + 1] = d[p + 2] = v;
+  }
+  ctx.putImageData(img, 0, 0);
 }
 
 self.onmessage = async (e: MessageEvent<OcrWorkerRequest>) => {
@@ -65,7 +94,7 @@ self.onmessage = async (e: MessageEvent<OcrWorkerRequest>) => {
 
   if (msg.type === "init") {
     try {
-      await ensureService();
+      await ensureWorker(msg.lang);
       post({ type: "ready" });
     } catch (err) {
       post({
@@ -80,33 +109,25 @@ self.onmessage = async (e: MessageEvent<OcrWorkerRequest>) => {
   if (msg.type === "recognize") {
     const { id, bitmap } = msg;
     try {
-      const w = await ensureService();
+      const w = await ensureWorker(currentLang);
 
-      // ImageBitmap → OffscreenCanvas (PaddleOcrService에 캔버스를 직접 입력)
       const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      const ctx = canvas.getContext("2d");
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) throw new Error("OffscreenCanvas 2d context 없음");
       ctx.drawImage(bitmap, 0, 0);
       bitmap.close();
 
-      const result = await w.recognize(
-        canvas as unknown as HTMLCanvasElement
-      );
+      // 인식률 향상을 위한 전처리
+      preprocess(ctx, canvas.width, canvas.height);
 
-      // 줄별 신뢰도 평균 → 0~100 환산 (없으면 0)
-      const lines = "lines" in result ? result.lines.flat() : [];
-      const avgConf =
-        lines.length > 0
-          ? (lines.reduce((acc, r) => acc + (r.confidence ?? 0), 0) /
-              lines.length) *
-            100
-          : 0;
+      const blob = await canvas.convertToBlob({ type: "image/png" });
 
+      const { data } = await w.recognize(blob);
       post({
         type: "result",
         id,
-        text: result.text ?? "",
-        confidence: avgConf,
+        text: data.text ?? "",
+        confidence: data.confidence ?? 0,
       });
     } catch (err) {
       try {
