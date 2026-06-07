@@ -4,6 +4,7 @@ import type { OcrWorkerRequest, OcrWorkerResponse } from "../types";
 
 let tWorker: TWorker | null = null;
 let initializing: Promise<void> | null = null;
+let currentLang = "kor+eng";
 
 function post(msg: OcrWorkerResponse) {
   (self as DedicatedWorkerGlobalScope).postMessage(msg);
@@ -11,6 +12,7 @@ function post(msg: OcrWorkerResponse) {
 
 async function ensureWorker(lang: string): Promise<TWorker> {
   if (tWorker) return tWorker;
+  currentLang = lang;
   if (!initializing) {
     initializing = (async () => {
       const w = await createWorker(lang, 1, {
@@ -50,7 +52,7 @@ self.onmessage = async (e: MessageEvent<OcrWorkerRequest>) => {
   if (msg.type === "recognize") {
     const { id, bitmap } = msg;
     try {
-      const w = await ensureWorker("eng");
+      const w = await ensureWorker(currentLang);
 
       // ImageBitmap -> OffscreenCanvas -> tesseract 입력
       const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);

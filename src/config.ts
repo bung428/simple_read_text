@@ -41,8 +41,8 @@ export const LOW_END_PROFILE: PerfProfile = {
   roiMaxWidth: 640,
 };
 
-// 일반 텍스트 인식 (영어/숫자/기호). whitelist 미사용.
-export const OCR_LANG = "eng";
+// 일반 텍스트 인식: 한글 + 영어 (+ 숫자/기호). whitelist 미사용.
+export const OCR_LANG = "kor+eng";
 
 // OCR 결과 채택 최소 신뢰도 (노이즈 프레임 필터)
 export const MIN_OCR_CONFIDENCE = 35;
