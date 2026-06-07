@@ -46,7 +46,8 @@ export type OcrWorkerResponse =
       text: string;
       confidence: number;
     }
-  | { type: "error"; id: number; message: string };
+  | { type: "error"; id: number; message: string }
+  | { type: "log"; message: string };
 
 // Main -> Worker 메시지
 export type OcrWorkerRequest =

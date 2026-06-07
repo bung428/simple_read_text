@@ -1,10 +1,73 @@
-import { defineConfig } from "vite";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 // GitHub Pages 프로젝트 페이지 경로: https://bung428.github.io/simple_read_text/
 const REPO_BASE = "/simple_read_text/";
+
+// dev 전용: 브라우저(devLog)에서 보낸 OCR 로그를 받아 터미널에 출력한다.
+function ocrDevLogPlugin(): Plugin {
+  return {
+    name: "ocr-dev-log",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use("/__ocr_log", (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end();
+          return;
+        }
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+        });
+        req.on("end", () => {
+          try {
+            const { message } = JSON.parse(body || "{}");
+            // 터미널에 또렷하게 보이도록 prefix
+            console.log(`\n\u001b[36m[OCR]\u001b[0m ${message}`);
+          } catch {
+            console.log("[OCR] (로그 파싱 실패)");
+          }
+          res.statusCode = 204;
+          res.end();
+        });
+      });
+
+      // 브라우저가 보낸 실제 캡처 이미지를 파일로 저장한다(진단용).
+      server.middlewares.use("/__ocr_image", (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end();
+          return;
+        }
+        const chunks: Buffer[] = [];
+        req.on("data", (chunk) => {
+          chunks.push(chunk as Buffer);
+        });
+        req.on("end", () => {
+          try {
+            const buf = Buffer.concat(chunks);
+            const dir = resolve(process.cwd(), ".ocr-debug");
+            mkdirSync(dir, { recursive: true });
+            const file = resolve(dir, "last-capture.png");
+            writeFileSync(file, buf);
+            console.log(
+              `\n\u001b[36m[OCR]\u001b[0m capture saved → ${file} (${buf.length} bytes)`
+            );
+          } catch (err) {
+            console.log("[OCR] 이미지 저장 실패", err);
+          }
+          res.statusCode = 204;
+          res.end();
+        });
+      });
+    },
+  };
+}
 
 // https://vite.dev/config/
 export default defineConfig(({ command }) => {
@@ -14,6 +77,7 @@ export default defineConfig(({ command }) => {
   return {
     base,
     plugins: [
+      ocrDevLogPlugin(),
       react(),
       tailwindcss(),
       VitePWA({
@@ -52,8 +116,6 @@ export default defineConfig(({ command }) => {
           maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
           // index.html 은 precache 하지 않고 항상 네트워크 우선으로 받음
           // (배포 후 옛 HTML→옛 JS 로 묶이는 문제 방지)
-          // wasm 은 precache 제외: onnxruntime-web wasm(≈26MB)은 런타임에
-          // CDN(jsdelivr)에서 받아 runtimeCaching으로 캐싱한다.
           globPatterns: ["**/*.{js,css,svg,png,ico}"],
           globIgnores: ["**/index.html", "**/*.wasm"],
           navigateFallback: null,
@@ -70,13 +132,13 @@ export default defineConfig(({ command }) => {
               },
             },
             {
-              // onnxruntime-web wasm 바이너리 (jsdelivr CDN) 캐싱
+              // Tesseract.js core/wasm CDN 리소스 캐싱
               urlPattern: ({ url }) =>
                 url.hostname === "cdn.jsdelivr.net" &&
-                url.pathname.includes("onnxruntime-web"),
+                url.pathname.includes("tesseract"),
               handler: "CacheFirst",
               options: {
-                cacheName: "ort-wasm",
+                cacheName: "tesseract-runtime",
                 expiration: {
                   maxEntries: 20,
                   maxAgeSeconds: 60 * 60 * 24 * 30,
@@ -84,15 +146,15 @@ export default defineConfig(({ command }) => {
               },
             },
             {
-              // PaddleOCR ONNX 모델 / 사전 (githubusercontent) 캐싱
+              // 한국어/영어 traineddata 캐싱 (첫 실행 이후 재사용)
               urlPattern: ({ url }) =>
-                url.hostname.endsWith("githubusercontent.com") &&
-                /\.(onnx|ort|txt)$/.test(url.pathname),
+                url.hostname === "tessdata.projectnaptha.com" &&
+                url.pathname.endsWith(".traineddata.gz"),
               handler: "CacheFirst",
               options: {
-                cacheName: "paddle-models",
+                cacheName: "tesseract-traineddata",
                 expiration: {
-                  maxEntries: 20,
+                  maxEntries: 8,
                   maxAgeSeconds: 60 * 60 * 24 * 30,
                 },
                 cacheableResponse: { statuses: [0, 200] },

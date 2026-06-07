@@ -1,12 +1,12 @@
 import type { PerfProfile } from "./types";
 
-// 카메라 제약: 720p, 후면 카메라 (4K 금지 - 발열/배터리)
+// 카메라 제약: 1080p 우선, 후면 카메라 (4K 금지 - 발열/배터리)
 export const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
   audio: false,
   video: {
     facingMode: { ideal: "environment" },
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
   },
 };
 

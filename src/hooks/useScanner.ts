@@ -4,6 +4,7 @@ import { QualityAnalyzer } from "../utils/quality";
 import { parseResult } from "../utils/parser";
 import { mapRoiToVideo } from "../utils/roi";
 import { OCR_LANG } from "../config";
+import { devLog, devLogImage } from "../utils/devLog";
 import type { FeedbackKind, OcrWorkerResponse, QualityResult } from "../types";
 
 // 품질 체크용 다운스케일 폭 (작게 -> 빠르고 저전력)
@@ -57,17 +58,25 @@ export function useScanner(
           // 이미 result 화면으로 이동한 상태. 인식 결과를 그 화면에 채운다.
           // (빈 결과여도 라이브로 되돌리지 않고 리뷰 화면에서 안내)
           const { text, candidates } = parseResult(msg.text, msg.confidence);
+          devLog(
+            `parsed text=${JSON.stringify(text)} candidates=${candidates
+              .map((c) => c.normalized)
+              .join("|")}`
+          );
           s.setResult(text, candidates);
           s.setOcrError(null);
           s.setProcessing(false);
           break;
         }
+        case "log":
+          devLog(msg.message);
+          break;
         case "error":
           // 인식 중 예외 → 리뷰 화면에 실제 메시지를 노출(진단용)
           s.setResult("", []);
           s.setOcrError(msg.message);
           s.setProcessing(false);
-          console.warn("[OCR] error:", msg.message);
+          devLog(`error: ${msg.message}`);
           break;
       }
     };
@@ -145,7 +154,10 @@ export function useScanner(
       if (!rect) return;
       const { x: roiX, y: roiY, w: roiW, h: roiH } = rect;
 
-      const targetW = Math.min(s.profile.roiMaxWidth, roiW);
+      // 원본 ROI 해상도 그대로 캡처한다(상한만 둠). 강제로 키우지 않는 이유:
+      // 글자가 큰 경우 업스케일하면 Tesseract가 한 글자를 쪼갠다. 최적 배율은
+      // 글자 크기에 따라 다르므로, 워커가 여러 배율로 시도해 가장 좋은 걸 고른다.
+      const targetW = Math.min(s.profile.roiMaxWidth, Math.round(roiW));
       const scale = targetW / roiW;
       const targetH = Math.max(1, Math.round(roiH * scale));
 
@@ -154,13 +166,24 @@ export function useScanner(
       rCanvas.height = targetH;
       const rCtx = rCanvas.getContext("2d");
       if (!rCtx) return;
+      rCtx.imageSmoothingEnabled = true;
+      rCtx.imageSmoothingQuality = "high";
       rCtx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, targetW, targetH);
+
+      devLog(
+        `capture: video=${video.videoWidth}x${video.videoHeight} ` +
+          `roi=${Math.round(roiW)}x${Math.round(roiH)} → out=${targetW}x${targetH} ` +
+          `quality=${Math.round(s.quality?.qualityScore ?? -1)} ` +
+          `blur=${Math.round(s.quality?.blurScore ?? -1)} ` +
+          `brightness=${Math.round(s.quality?.brightness ?? -1)}`
+      );
 
       const id = ++reqIdRef.current;
 
       // 1) 촬영 미리보기(blob) 생성 → 즉시 결과화면으로 이동(사진이 사라지지 않게)
       rCanvas.toBlob(
         (blob) => {
+          if (blob) devLogImage(blob);
           const st = useAppStore.getState();
           st.setCapturedImage(blob ? URL.createObjectURL(blob) : null);
           st.setResult("", []); // 이전 결과 비우고 인식 대기 상태로

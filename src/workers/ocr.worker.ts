@@ -7,8 +7,17 @@ let tWorker: TWorker | null = null;
 let initializing: Promise<void> | null = null;
 let currentLang = "kor+eng";
 
+interface OcrAttempt {
+  text: string;
+  confidence: number;
+}
+
 function post(msg: OcrWorkerResponse) {
   (self as DedicatedWorkerGlobalScope).postMessage(msg);
+}
+
+function logDebug(message: string) {
+  post({ type: "log", message });
 }
 
 async function ensureWorker(lang: string): Promise<TWorker> {
@@ -24,8 +33,10 @@ async function ensureWorker(lang: string): Promise<TWorker> {
         },
       });
       await w.setParameters({
-        // PSM 3: 자동 페이지 분할 (여러 줄/문단 문서·화면 인식에 적합)
-        tessedit_pageseg_mode: "3" as unknown as never,
+        // PSM 11 = "sparse text": 레이아웃을 가정하지 않고 화면 어디에 있든
+        // 글자를 최대한 찾는다. 카메라로 임의의 장면/기울어진 카드/화면을 찍는
+        // 이 앱에는 단일 블록 가정인 PSM 3/6보다 훨씬 안정적이다.
+        tessedit_pageseg_mode: "11" as unknown as never,
         // 단어 사이 공백 보존 (한글 띄어쓰기 유지)
         preserve_interword_spaces: "1" as unknown as never,
       });
@@ -89,6 +100,104 @@ function preprocess(
   ctx.putImageData(img, 0, 0);
 }
 
+/** 의미있는 글자(한글/영문/숫자) 개수 */
+function meaningfulCharCount(text: string): number {
+  return (text.match(/[0-9A-Za-z가-힣]/g) ?? []).length;
+}
+
+/**
+ * 결과 품질 점수.
+ * 글자수×신뢰도만 쓰면 한 글자씩 쪼개진 "분절 쓰레기"가 높게 나온다.
+ * 그래서 "2글자 이상 토큰에 들어간 의미글자 수"만 세서, 단어로 묶인 정도를
+ * 보상한다. (예: "고딕체 명조체" > "고 제 너 스체")
+ */
+function scoreAttempt(attempt: OcrAttempt): number {
+  let grouped = 0;
+  for (const token of attempt.text.split(/\s+/)) {
+    const m = (token.match(/[0-9A-Za-z가-힣]/g) ?? []).length;
+    if (m >= 2) grouped += m;
+  }
+  // 묶인 글자가 하나도 없으면(전부 단발) 최소한의 정보량만 인정
+  if (grouped === 0) grouped = meaningfulCharCount(attempt.text) > 0 ? 1 : 0;
+  return grouped * Math.max(1, attempt.confidence);
+}
+
+/** 비트맵을 지정한 폭으로 리스케일한 캔버스를 만든다(고품질 보간). */
+function rescale(
+  bitmap: ImageBitmap,
+  targetW: number
+): OffscreenCanvas {
+  const scale = targetW / bitmap.width;
+  const targetH = Math.max(1, Math.round(bitmap.height * scale));
+  const c = new OffscreenCanvas(targetW, targetH);
+  const ctx = c.getContext("2d");
+  if (!ctx) throw new Error("OffscreenCanvas 2d context 없음");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+  return c;
+}
+
+// 시도할 OCR 입력 폭(px).
+// 글자 크기를 미리 알 수 없어, 큰 글자에 맞는 작은 폭과 작은 글자에 맞는 큰 폭을
+// 모두 시도한 뒤 가장 분절이 적은 결과를 채택한다. (cap-height ~30~50px가 최적)
+const OCR_WIDTHS = [560, 960];
+
+/**
+ * 여러 배율로 인식해 가장 깨끗한(분절이 적은) 결과를 채택한다.
+ */
+async function recognizeBest(worker: TWorker, bitmap: ImageBitmap) {
+  logDebug(`source bitmap = ${bitmap.width}x${bitmap.height}px`);
+
+  const attempts: OcrAttempt[] = [];
+  for (const width of OCR_WIDTHS) {
+    const canvas = rescale(bitmap, width);
+    const blob = await canvas.convertToBlob({ type: "image/png" });
+    const { data } = await worker.recognize(blob);
+    const attempt: OcrAttempt = {
+      text: data.text ?? "",
+      confidence: data.confidence ?? 0,
+    };
+    attempts.push(attempt);
+    logDebug(
+      `w=${width} conf=${attempt.confidence.toFixed(
+        0
+      )} score=${scoreAttempt(attempt).toFixed(0)} text=${JSON.stringify(
+        attempt.text
+      )}`
+    );
+  }
+
+  const best = attempts.reduce(
+    (b, c) => (scoreAttempt(c) > scoreAttempt(b) ? c : b),
+    { text: "", confidence: 0 } as OcrAttempt
+  );
+
+  // 모든 배율이 글자를 못 찾았을 때만 대비 보정 후 마지막으로 한 번 더 시도.
+  if (meaningfulCharCount(best.text) === 0) {
+    logDebug("모든 배율 실패 → 대비 보정 후 재시도");
+    const canvas = rescale(bitmap, OCR_WIDTHS[OCR_WIDTHS.length - 1]);
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (ctx) {
+      preprocess(ctx, canvas.width, canvas.height);
+      const blob = await canvas.convertToBlob({ type: "image/png" });
+      const { data } = await worker.recognize(blob);
+      const fallback: OcrAttempt = {
+        text: data.text ?? "",
+        confidence: data.confidence ?? 0,
+      };
+      logDebug(
+        `preprocessed conf=${fallback.confidence.toFixed(
+          0
+        )} text=${JSON.stringify(fallback.text)}`
+      );
+      if (meaningfulCharCount(fallback.text) > 0) return fallback;
+    }
+  }
+
+  return best;
+}
+
 self.onmessage = async (e: MessageEvent<OcrWorkerRequest>) => {
   const msg = e.data;
 
@@ -111,23 +220,13 @@ self.onmessage = async (e: MessageEvent<OcrWorkerRequest>) => {
     try {
       const w = await ensureWorker(currentLang);
 
-      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (!ctx) throw new Error("OffscreenCanvas 2d context 없음");
-      ctx.drawImage(bitmap, 0, 0);
+      const result = await recognizeBest(w, bitmap);
       bitmap.close();
-
-      // 인식률 향상을 위한 전처리
-      preprocess(ctx, canvas.width, canvas.height);
-
-      const blob = await canvas.convertToBlob({ type: "image/png" });
-
-      const { data } = await w.recognize(blob);
       post({
         type: "result",
         id,
-        text: data.text ?? "",
-        confidence: data.confidence ?? 0,
+        text: result.text,
+        confidence: result.confidence,
       });
     } catch (err) {
       try {
