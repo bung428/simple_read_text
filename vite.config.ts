@@ -51,8 +51,23 @@ export default defineConfig(({ command }) => {
         workbox: {
           // tesseract 관련 대용량 wasm/언어 파일까지 캐싱
           maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
-          globPatterns: ["**/*.{js,css,html,svg,png,ico,wasm}"],
+          // index.html 은 precache 하지 않고 항상 네트워크 우선으로 받음
+          // (배포 후 옛 HTML→옛 JS 로 묶이는 문제 방지)
+          globPatterns: ["**/*.{js,css,svg,png,ico,wasm}"],
+          globIgnores: ["**/index.html"],
+          navigateFallback: null,
+          cleanupOutdatedCaches: true,
           runtimeCaching: [
+            {
+              // 페이지(HTML) 이동 요청: 온라인이면 항상 최신, 오프라인이면 캐시
+              urlPattern: ({ request }) => request.mode === "navigate",
+              handler: "NetworkFirst",
+              options: {
+                cacheName: "html",
+                networkTimeoutSeconds: 4,
+                expiration: { maxEntries: 4 },
+              },
+            },
             {
               // tesseract 코어/언어 traineddata CDN 캐싱
               urlPattern: /^https:\/\/.*\.(wasm|traineddata\.gz|traineddata)$/,
