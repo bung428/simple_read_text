@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: #0f172a;
+  color: #e2e8f0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  /* iOS 노치/홈바 안전영역 대응 */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* 결과 텍스트는 선택 가능하도록 */
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ROI 스캔 진행 애니메이션 */
+@keyframes scan {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
