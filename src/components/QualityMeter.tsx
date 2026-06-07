@@ -22,7 +22,6 @@ export function QualityMeter({ quality }: { quality: QualityResult | null }) {
   return (
     <div className="flex w-full flex-col gap-1.5 rounded-xl bg-slate-800/70 p-3 backdrop-blur">
       <Bar label="밝기" value={quality.brightnessScore} />
-      <Bar label="안정" value={quality.motionScore} />
       <Bar label="선명" value={quality.blurScore} />
     </div>
   );

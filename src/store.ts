@@ -25,8 +25,8 @@ interface AppState {
   quality: QualityResult | null;
   feedback: FeedbackKind;
 
-  candidates: OcrCandidate[];
-  selected: OcrCandidate | null;
+  recognizedText: string; // 읽어낸 전체 텍스트
+  candidates: OcrCandidate[]; // 빠른 복사용 자동 감지 항목
   lastCopied: string | null;
 
   profile: PerfProfile;
@@ -40,8 +40,7 @@ interface AppState {
   setProcessing: (v: boolean) => void;
   setQuality: (q: QualityResult, feedback: FeedbackKind) => void;
   setFeedback: (f: FeedbackKind) => void;
-  setCandidates: (c: OcrCandidate[]) => void;
-  selectCandidate: (c: OcrCandidate | null) => void;
+  setResult: (text: string, candidates: OcrCandidate[]) => void;
   setCopied: (s: string) => void;
   togglePause: () => void;
   reset: () => void;
@@ -58,8 +57,8 @@ export const useAppStore = create<AppState>((set) => ({
   quality: null,
   feedback: "idle",
 
+  recognizedText: "",
   candidates: [],
-  selected: null,
   lastCopied: null,
 
   profile: detectLowEnd() ? LOW_END_PROFILE : DEFAULT_PROFILE,
@@ -72,24 +71,14 @@ export const useAppStore = create<AppState>((set) => ({
   setProcessing: (isProcessing) => set({ isProcessing }),
   setQuality: (quality, feedback) => set({ quality, feedback }),
   setFeedback: (feedback) => set({ feedback }),
-  setCandidates: (candidates) =>
-    set((s) => ({
-      candidates,
-      // 새 후보가 들어오면 기존 선택이 목록에 없을 때만 첫 항목 자동 선택
-      selected:
-        candidates.length > 0 &&
-        (!s.selected ||
-          !candidates.some((c) => c.normalized === s.selected?.normalized))
-          ? candidates[0]
-          : s.selected,
-    })),
-  selectCandidate: (selected) => set({ selected }),
+  setResult: (recognizedText, candidates) =>
+    set({ recognizedText, candidates }),
   setCopied: (lastCopied) => set({ lastCopied }),
   togglePause: () => set((s) => ({ paused: !s.paused })),
   reset: () =>
     set({
+      recognizedText: "",
       candidates: [],
-      selected: null,
       lastCopied: null,
       feedback: "idle",
       quality: null,

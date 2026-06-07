@@ -1,6 +1,5 @@
 /// <reference lib="webworker" />
 import { createWorker, type Worker as TWorker } from "tesseract.js";
-import { OCR_CHAR_WHITELIST } from "../config";
 import type { OcrWorkerRequest, OcrWorkerResponse } from "../types";
 
 let tWorker: TWorker | null = null;
@@ -19,10 +18,9 @@ async function ensureWorker(lang: string): Promise<TWorker> {
           post({ type: "progress", status: m.status, progress: m.progress });
         },
       });
-      // 숫자/하이픈 위주 인식 + 단일 라인/블록 최적화
+      // 일반 텍스트(영어/숫자/기호) 인식. whitelist 미설정.
+      // PSM 6: 균일한 텍스트 블록으로 간주 (ROI 박스 안의 줄들)
       await w.setParameters({
-        tessedit_char_whitelist: OCR_CHAR_WHITELIST,
-        // PSM 6: 균일한 텍스트 블록으로 간주
         tessedit_pageseg_mode: "6" as unknown as never,
       });
       tWorker = w;

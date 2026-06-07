@@ -2,21 +2,19 @@ import { useState } from "react";
 import { useAppStore } from "../store";
 import { copyText } from "../utils/clipboard";
 import { KIND_LABEL } from "../utils/parser";
-import type { OcrCandidate } from "../types";
 
 export function ResultPanel() {
+  const recognizedText = useAppStore((s) => s.recognizedText);
   const candidates = useAppStore((s) => s.candidates);
-  const selected = useAppStore((s) => s.selected);
-  const selectCandidate = useAppStore((s) => s.selectCandidate);
   const setCopied = useAppStore((s) => s.setCopied);
   const reset = useAppStore((s) => s.reset);
 
   const [toast, setToast] = useState<string | null>(null);
 
-  const handleCopy = async (c: OcrCandidate) => {
-    const ok = await copyText(c.normalized);
+  const handleCopy = async (value: string) => {
+    const ok = await copyText(value);
     if (ok) {
-      setCopied(c.normalized);
+      setCopied(value);
       setToast("복사되었습니다");
     } else {
       setToast("복사 실패 · 길게 눌러 복사해주세요");
@@ -24,10 +22,12 @@ export function ResultPanel() {
     window.setTimeout(() => setToast(null), 1600);
   };
 
-  if (candidates.length === 0) {
+  const hasResult = recognizedText.length > 0 || candidates.length > 0;
+
+  if (!hasResult) {
     return (
       <div className="rounded-2xl bg-slate-800/70 p-4 text-center text-sm text-slate-400 backdrop-blur">
-        박스 안에 번호를 비추면 자동으로 인식됩니다
+        박스 안에 글자를 비추면 자동으로 인식됩니다
       </div>
     );
   }
@@ -35,9 +35,7 @@ export function ResultPanel() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between px-1">
-        <span className="text-xs font-medium text-slate-400">
-          인식 결과 ({candidates.length})
-        </span>
+        <span className="text-xs font-medium text-slate-400">인식 결과</span>
         <button
           onClick={reset}
           className="rounded-full px-3 py-1 text-xs text-slate-300 active:bg-slate-700"
@@ -46,43 +44,40 @@ export function ResultPanel() {
         </button>
       </div>
 
-      {/* 대표(선택) 후보 강조 */}
-      {selected && (
+      {/* 읽은 전체 텍스트 */}
+      {recognizedText && (
         <div className="rounded-2xl bg-slate-800 p-4 shadow-lg ring-1 ring-slate-700">
-          <div className="mb-1 text-xs font-medium text-sky-400">
-            {KIND_LABEL[selected.kind]}
-          </div>
-          <div className="selectable break-all font-mono text-2xl font-bold tracking-wide text-white">
-            {selected.normalized}
+          <div className="mb-2 text-xs font-medium text-sky-400">읽은 텍스트</div>
+          <div className="selectable max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-lg font-semibold leading-relaxed text-white">
+            {recognizedText}
           </div>
           <button
-            onClick={() => handleCopy(selected)}
+            onClick={() => handleCopy(recognizedText)}
             className="mt-3 w-full rounded-xl bg-sky-500 py-3 text-base font-semibold text-white shadow active:bg-sky-600"
           >
-            복사하기
+            전체 복사
           </button>
         </div>
       )}
 
-      {/* 다른 후보들 */}
-      {candidates.length > 1 && (
+      {/* 자동 감지된 빠른 복사 항목 (번호/이메일/링크) */}
+      {candidates.length > 0 && (
         <div className="flex flex-col gap-2">
-          {candidates
-            .filter((c) => c.normalized !== selected?.normalized)
-            .map((c) => (
-              <button
-                key={c.normalized}
-                onClick={() => selectCandidate(c)}
-                className="flex items-center justify-between rounded-xl bg-slate-800/70 px-4 py-2.5 text-left active:bg-slate-700"
-              >
-                <span className="selectable break-all font-mono text-base text-slate-200">
-                  {c.normalized}
-                </span>
-                <span className="ml-2 shrink-0 text-[10px] text-slate-500">
-                  {KIND_LABEL[c.kind]}
-                </span>
-              </button>
-            ))}
+          <span className="px-1 text-[11px] text-slate-500">빠른 복사</span>
+          {candidates.map((c) => (
+            <button
+              key={`${c.kind}:${c.normalized}`}
+              onClick={() => handleCopy(c.normalized)}
+              className="flex items-center justify-between gap-2 rounded-xl bg-slate-800/70 px-4 py-2.5 text-left active:bg-slate-700"
+            >
+              <span className="selectable break-all font-mono text-base text-slate-200">
+                {c.normalized}
+              </span>
+              <span className="shrink-0 text-[10px] text-slate-500">
+                {KIND_LABEL[c.kind]}
+              </span>
+            </button>
+          ))}
         </div>
       )}
 

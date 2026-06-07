@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
 import { useAppStore } from "../store";
 import { QualityAnalyzer } from "../utils/quality";
-import { parseCandidates } from "../utils/parser";
+import { parseResult } from "../utils/parser";
 import { mapRoiToVideo } from "../utils/roi";
-import { OCR_LANG } from "../config";
+import { MIN_OCR_CONFIDENCE, OCR_LANG } from "../config";
 import type { FeedbackKind, OcrWorkerResponse, QualityResult } from "../types";
 
 // 품질 체크용 다운스케일 폭 (작게 -> 빠르고 저전력)
@@ -53,9 +53,11 @@ export function useScanner(
           break;
         case "result": {
           s.setProcessing(false);
-          const candidates = parseCandidates(msg.text, msg.confidence);
-          if (candidates.length > 0) {
-            s.setCandidates(candidates);
+          const { text, candidates } = parseResult(msg.text, msg.confidence);
+          const hasMeaning = /[0-9A-Za-z가-힣]/.test(text);
+          // 노이즈 프레임 필터: 최소 신뢰도 + 의미 있는 문자 포함
+          if (text && hasMeaning && msg.confidence >= MIN_OCR_CONFIDENCE) {
+            s.setResult(text, candidates);
             s.setFeedback("found");
           }
           break;
@@ -121,7 +123,8 @@ export function useScanner(
       const feedback = decideFeedback(quality, s.profile.qualityThreshold);
 
       // found 상태는 유지(결과가 있으면), 그 외에는 품질 피드백 갱신
-      if (!(s.candidates.length > 0 && feedback === "ready")) {
+      const hasResult = s.recognizedText.length > 0 || s.candidates.length > 0;
+      if (!(hasResult && feedback === "ready")) {
         s.setQuality(quality, feedback);
       } else {
         s.setQuality(quality, s.feedback === "found" ? "found" : feedback);
@@ -205,10 +208,8 @@ function decideFeedback(
   if (q.brightnessScore < 50) {
     return q.brightness < 70 ? "too-dark" : "too-bright";
   }
-  if (q.motionScore < 55) return "motion";
   if (q.blurScore < 45) return "blur";
   if (q.qualityScore >= threshold) return "ready";
-  // 종합 점수는 낮지만 딱히 한 가지 문제로 보기 애매한 경우
-  if (q.blurScore <= q.motionScore) return "blur";
-  return "motion";
+  // 종합 점수가 낮으면 대부분 선명도 문제
+  return "blur";
 }
