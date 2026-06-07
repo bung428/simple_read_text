@@ -35,8 +35,13 @@ export function useCamera(videoRef: React.RefObject<HTMLVideoElement | null>) {
         CAMERA_CONSTRAINTS
       );
       streamRef.current = stream;
-      const video = videoRef.current;
-      if (!video) return;
+      const video = await waitForVideoElement(videoRef);
+      if (!video) {
+        stopStream(stream);
+        streamRef.current = null;
+        setError("카메라 화면을 준비하지 못했습니다. 다시 시도해주세요.");
+        return;
+      }
       video.srcObject = stream;
       // iOS Safari autoplay 대응: muted + playsInline 필요 (JSX에서 설정)
       try {
@@ -46,6 +51,10 @@ export function useCamera(videoRef: React.RefObject<HTMLVideoElement | null>) {
       }
       setPhase("scanning");
     } catch (err) {
+      if (streamRef.current) {
+        stopStream(streamRef.current);
+        streamRef.current = null;
+      }
       const e = err as DOMException;
       if (e.name === "NotAllowedError" || e.name === "SecurityError") {
         setPhase("denied");
@@ -75,4 +84,31 @@ export function useCamera(videoRef: React.RefObject<HTMLVideoElement | null>) {
   }, [stop]);
 
   return { start, stop };
+}
+
+function stopStream(stream: MediaStream) {
+  stream.getTracks().forEach((t) => t.stop());
+}
+
+function waitForVideoElement(
+  videoRef: React.RefObject<HTMLVideoElement | null>,
+  timeoutMs = 1000
+): Promise<HTMLVideoElement | null> {
+  const startedAt = performance.now();
+
+  return new Promise((resolve) => {
+    const check = () => {
+      if (videoRef.current) {
+        resolve(videoRef.current);
+        return;
+      }
+      if (performance.now() - startedAt >= timeoutMs) {
+        resolve(null);
+        return;
+      }
+      requestAnimationFrame(check);
+    };
+
+    check();
+  });
 }

@@ -18,6 +18,7 @@ export default function App() {
   // 스캐너(품질분석 + OCR worker)는 앱 생애주기 동안 한 번만 마운트
   useScanner(videoRef, roiRef);
 
+  const cameraActive = phase === "requesting" || phase === "scanning";
   const scanning = phase === "scanning";
 
   const handleStart = () => {
@@ -28,7 +29,7 @@ export default function App() {
     <div className="mx-auto flex h-full max-w-md flex-col bg-slate-900">
       {/* 카메라 영역 (상단 고정 비율) */}
       <div className="relative w-full" style={{ height: "58vh" }}>
-        {scanning ? (
+        {cameraActive ? (
           <CameraView ref={roiRef} videoRef={videoRef} />
         ) : (
           <StartScreen onStart={handleStart} />
