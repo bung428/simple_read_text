@@ -49,12 +49,7 @@ export const OCR_LANG = "kor+eng";
 // 한국어 정확도가 월등한 LSTM "best" traineddata 사용 (fast 대비 인식률 ↑)
 export const TESS_LANG_PATH = "https://tessdata.projectnaptha.com/4.0.0_best";
 
-// 한 프레임이라도 화면에 표시(피드백)할 최소 신뢰도
-export const MIN_OCR_CONFIDENCE = 35;
-
-// 자동으로 결과화면으로 "확정 이동"할 최소 신뢰도 / 최소 의미 문자 수
-// 품질이 좋은(초록) 프레임에서만 OCR이 돌므로, 첫 인식에서 바로 넘어가도록 낮게.
-export const CAPTURE_MIN_CONFIDENCE = 45;
+// 촬영 후 결과를 채택할 최소 의미 문자 수 (이보다 적으면 인식 실패로 간주)
 export const CAPTURE_MIN_CHARS = 2;
 
 // 저사양 기기 추정: 논리 코어 수 / 메모리 기반

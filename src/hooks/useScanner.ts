@@ -1,21 +1,19 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useAppStore } from "../store";
 import { QualityAnalyzer } from "../utils/quality";
 import { parseResult } from "../utils/parser";
 import { mapRoiToVideo } from "../utils/roi";
-import {
-  CAPTURE_MIN_CHARS,
-  CAPTURE_MIN_CONFIDENCE,
-  OCR_LANG,
-} from "../config";
+import { CAPTURE_MIN_CHARS, OCR_LANG } from "../config";
 import type { FeedbackKind, OcrWorkerResponse, QualityResult } from "../types";
 
 // 품질 체크용 다운스케일 폭 (작게 -> 빠르고 저전력)
 const QUALITY_SAMPLE_W = 160;
 
 /**
- * 카메라 프레임을 주기적으로 샘플링하여 품질을 분석하고,
- * 좋은 프레임에서만 ROI를 잘라 OCR Worker로 보낸다.
+ * 카메라 프레임을 주기적으로 분석해 "촬영해도 좋은 상태"(밝기/선명도)를 판단한다.
+ * 실시간 OCR은 하지 않으며, 사용자가 촬영 버튼을 눌렀을 때만(capture) OCR을 수행한다.
+ *
+ * @returns capture - 현재 프레임의 ROI를 메모리로 캡처해 OCR을 실행하는 함수
  */
 export function useScanner(
   videoRef: React.RefObject<HTMLVideoElement | null>,
@@ -25,11 +23,13 @@ export function useScanner(
   const workerRef = useRef<Worker | null>(null);
   const qualityCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const roiCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const lastOcrRef = useRef(0);
   const reqIdRef = useRef(0);
+  // 인식 실패 메시지를 잠깐 유지하기 위한 시각 (품질 루프가 즉시 덮어쓰지 않도록)
+  const failUntilRef = useRef(0);
+  // 실제 캡처 구현체를 담아 안정적인 콜백으로 노출
+  const captureImplRef = useRef<() => void>(() => {});
 
   useEffect(() => {
-    // 오프스크린 작업용 캔버스 준비
     qualityCanvasRef.current = document.createElement("canvas");
     roiCanvasRef.current = document.createElement("canvas");
 
@@ -59,21 +59,22 @@ export function useScanner(
           s.setProcessing(false);
           const { text, candidates } = parseResult(msg.text, msg.confidence);
           const meaningfulChars = (text.match(/[0-9A-Za-z가-힣]/g) ?? []).length;
-          // 충분히 신뢰할 만한 프레임이면 결과를 확정하고 결과화면으로 이동
-          if (
-            text &&
-            meaningfulChars >= CAPTURE_MIN_CHARS &&
-            msg.confidence >= CAPTURE_MIN_CONFIDENCE
-          ) {
+          // 사용자가 직접 촬영했으므로, 의미 있는 글자가 잡히면 바로 결과화면으로
+          if (text && meaningfulChars >= CAPTURE_MIN_CHARS) {
             s.setResult(text, candidates);
             s.setFeedback("found");
             s.setPhase("result");
+          } else {
+            // 인식 실패: 잠시 안내 후 다시 촬영 가능
+            failUntilRef.current = Date.now() + 1800;
+            s.setFeedback("fail");
           }
           break;
         }
         case "error":
           s.setProcessing(false);
-          // OCR 단건 실패는 치명적이지 않으므로 로그만
+          failUntilRef.current = Date.now() + 1800;
+          s.setFeedback("fail");
           console.warn("[OCR] error:", msg.message);
           break;
       }
@@ -81,7 +82,7 @@ export function useScanner(
 
     worker.postMessage({ type: "init", lang: OCR_LANG });
 
-    // --- 샘플링 루프 (setTimeout 재귀로 주기 동적 조정) ---
+    // --- 품질 분석 루프 (border 색상용. OCR은 절대 자동 실행하지 않음) ---
     let timer: number | undefined;
     let stopped = false;
 
@@ -90,34 +91,33 @@ export function useScanner(
       const s = useAppStore.getState();
       const interval = s.profile.sampleIntervalMs;
       try {
-        sampleFrame();
+        sampleQuality();
       } catch (err) {
         console.warn("[scanner] sample error", err);
       }
       timer = window.setTimeout(tick, interval);
     };
 
-    const sampleFrame = () => {
+    const sampleQuality = () => {
       const video = videoRef.current;
       const roiEl = roiRef.current;
       const s = useAppStore.getState();
       if (
         !video ||
         !roiEl ||
-        s.paused ||
         s.phase !== "scanning" ||
+        s.isProcessing ||
+        Date.now() < failUntilRef.current ||
         video.readyState < 2 ||
         video.videoWidth === 0
       ) {
         return;
       }
 
-      // 화면상의 ROI 박스 -> 원본 비디오 픽셀 좌표로 매핑
       const rect = mapRoiToVideo(video, roiEl);
       if (!rect) return;
       const { x: roiX, y: roiY, w: roiW, h: roiH } = rect;
 
-      // 1) 품질 분석용 다운스케일 (작게)
       const qCanvas = qualityCanvasRef.current!;
       const qW = QUALITY_SAMPLE_W;
       const qH = Math.max(1, Math.round(qW * (roiH / roiW)));
@@ -130,29 +130,33 @@ export function useScanner(
 
       const quality = analyzerRef.current.analyze(imgData.data, qW, qH);
       const feedback = decideFeedback(quality, s.profile.qualityThreshold);
+      s.setQuality(quality, feedback);
+    };
 
-      // found 상태는 유지(결과가 있으면), 그 외에는 품질 피드백 갱신
-      const hasResult = s.recognizedText.length > 0 || s.candidates.length > 0;
-      if (!(hasResult && feedback === "ready")) {
-        s.setQuality(quality, feedback);
-      } else {
-        s.setQuality(quality, s.feedback === "found" ? "found" : feedback);
+    // --- 촬영(수동 캡처) ---
+    const doCapture = () => {
+      const video = videoRef.current;
+      const roiEl = roiRef.current;
+      const s = useAppStore.getState();
+      if (
+        !video ||
+        !roiEl ||
+        !s.ocrReady ||
+        s.isProcessing ||
+        s.phase !== "scanning" ||
+        video.readyState < 2 ||
+        video.videoWidth === 0
+      ) {
+        return;
       }
 
-      // 2) OCR 실행 조건 판단
-      const cooldownPassed =
-        Date.now() - lastOcrRef.current > s.profile.ocrCooldownMs;
-      const shouldOcr =
-        s.ocrReady &&
-        !s.isProcessing &&
-        cooldownPassed &&
-        quality.qualityScore >= s.profile.qualityThreshold;
+      const rect = mapRoiToVideo(video, roiEl);
+      if (!rect) return;
+      const { x: roiX, y: roiY, w: roiW, h: roiH } = rect;
 
-      if (!shouldOcr) return;
-
-      // 3) ROI를 OCR 해상도로 잘라 ImageBitmap 생성
-      lastOcrRef.current = Date.now();
       s.setProcessing(true);
+      s.setFeedback("scanning");
+      failUntilRef.current = 0;
 
       const targetW = Math.min(s.profile.roiMaxWidth, roiW);
       const scale = targetW / roiW;
@@ -166,21 +170,15 @@ export function useScanner(
         s.setProcessing(false);
         return;
       }
-      rCtx.drawImage(
-        video,
-        roiX,
-        roiY,
-        roiW,
-        roiH,
-        0,
-        0,
-        targetW,
-        targetH
-      );
+      rCtx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, targetW, targetH);
 
       const id = ++reqIdRef.current;
       createImageBitmap(rCanvas)
         .then((bitmap) => {
+          // 비트맵으로 복사 완료 → 캔버스(촬영 이미지) 즉시 비워 메모리 회수
+          rCanvas.width = 0;
+          rCanvas.height = 0;
+          // 비트맵은 worker로 transfer되며, worker가 OCR 직후 close()로 해제한다
           worker.postMessage({ type: "recognize", id, bitmap }, [bitmap]);
         })
         .catch((err) => {
@@ -188,8 +186,8 @@ export function useScanner(
           useAppStore.getState().setProcessing(false);
         });
     };
+    captureImplRef.current = doCapture;
 
-    // 루프는 항상 돌며 내부에서 phase/paused 를 확인한다
     tick();
 
     return () => {
@@ -198,7 +196,6 @@ export function useScanner(
       worker.terminate();
       workerRef.current = null;
       analyzerRef.current.reset();
-      // 캔버스 메모리 해제
       [qualityCanvasRef.current, roiCanvasRef.current].forEach((c) => {
         if (c) {
           c.width = 0;
@@ -208,6 +205,12 @@ export function useScanner(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const capture = useCallback(() => {
+    captureImplRef.current();
+  }, []);
+
+  return { capture };
 }
 
 function decideFeedback(

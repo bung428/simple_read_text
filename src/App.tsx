@@ -14,7 +14,7 @@ export default function App() {
 
   const { start, stop } = useCamera(videoRef);
   // 스캐너(품질분석 + OCR worker)는 앱 생애주기 동안 한 번만 마운트
-  useScanner(videoRef, roiRef);
+  const { capture } = useScanner(videoRef, roiRef);
 
   // 카메라 스트림은 scanning ↔ result 사이에서 살아있어야 재스캔이 즉시 된다
   const cameraActive =
@@ -49,7 +49,12 @@ export default function App() {
   return (
     <div className="relative mx-auto h-full max-w-md overflow-hidden bg-black">
       {cameraActive ? (
-        <CameraView ref={roiRef} videoRef={videoRef} onClose={handleClose} />
+        <CameraView
+          ref={roiRef}
+          videoRef={videoRef}
+          onClose={handleClose}
+          onCapture={capture}
+        />
       ) : (
         <StartScreen onStart={handleStart} />
       )}

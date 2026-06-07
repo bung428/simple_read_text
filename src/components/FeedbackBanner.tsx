@@ -5,9 +5,10 @@ const MESSAGES: Record<FeedbackKind, { text: string; tone: string }> = {
   "too-dark": { text: "너무 어두워요 · 밝은 곳에서 시도해주세요", tone: "bg-amber-600/90" },
   "too-bright": { text: "너무 밝아요 · 빛 반사를 피해주세요", tone: "bg-amber-600/90" },
   blur: { text: "초점을 맞춰주세요", tone: "bg-amber-600/90" },
-  ready: { text: "인식 중...", tone: "bg-sky-600/90" },
+  ready: { text: "준비됐어요 · 촬영 버튼을 눌러주세요", tone: "bg-emerald-600/90" },
   scanning: { text: "인식 중...", tone: "bg-sky-600/90" },
   found: { text: "텍스트를 읽었어요!", tone: "bg-emerald-600/90" },
+  fail: { text: "인식하지 못했어요 · 다시 촬영해주세요", tone: "bg-rose-600/90" },
 };
 
 export function FeedbackBanner({ feedback }: { feedback: FeedbackKind }) {

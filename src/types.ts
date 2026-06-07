@@ -15,7 +15,8 @@ export type FeedbackKind =
   | "blur"
   | "ready"
   | "scanning"
-  | "found";
+  | "found"
+  | "fail";
 
 // OCR 후보 결과 (빠른 복사용으로 자동 감지된 항목)
 export interface OcrCandidate {
