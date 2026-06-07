@@ -46,6 +46,11 @@ async function ensureService(): Promise<PaddleOcrService> {
           recognition: PADDLE_REC_URL,
           charactersDictionary: PADDLE_DICT_URL,
         },
+        // 실행 백엔드를 WASM(CPU)으로 고정한다.
+        // 기본값은 ["webgpu","wasm"]라서 WebGPU가 켜진 모바일 브라우저에선
+        // WebGPU로 추론하는데, 모바일 GPU에서 PP-OCRv5 검출/인식이 빈 결과를
+        // 내는 사례가 있다(데스크톱 WASM에선 정상). 정확도/일관성을 위해 WASM 고정.
+        session: { executionProviders: ["wasm"] },
       });
       await s.initialize();
       service = s;
