@@ -26,20 +26,21 @@ export const ROI_WIDTH_RATIO = 0.9;
 export const ROI_ASPECT = 0.64;
 
 // 기본 성능 프로파일 (일반 기기)
-// roiMaxWidth ↑: 한글은 획이 복잡해 고해상도(≈300DPI 상당)가 인식률에 결정적
+// roiMaxWidth: 한글 인식엔 고해상도가 유리하나, 너무 크면 best 모델이 느려져
+// "인식 중"이 길어진다 → 정확도/속도 균형점으로 1200px.
 export const DEFAULT_PROFILE: PerfProfile = {
-  sampleIntervalMs: 350,
-  ocrCooldownMs: 1200,
+  sampleIntervalMs: 300,
+  ocrCooldownMs: 600,
   qualityThreshold: 62,
-  roiMaxWidth: 1500,
+  roiMaxWidth: 1200,
 };
 
 // 저사양 기기 fallback 프로파일
 export const LOW_END_PROFILE: PerfProfile = {
-  sampleIntervalMs: 550,
-  ocrCooldownMs: 2000,
+  sampleIntervalMs: 500,
+  ocrCooldownMs: 1200,
   qualityThreshold: 58,
-  roiMaxWidth: 1100,
+  roiMaxWidth: 900,
 };
 
 // 일반 텍스트 인식: 한글 + 영어 (+ 숫자/기호). whitelist 미사용.
@@ -52,8 +53,9 @@ export const TESS_LANG_PATH = "https://tessdata.projectnaptha.com/4.0.0_best";
 export const MIN_OCR_CONFIDENCE = 35;
 
 // 자동으로 결과화면으로 "확정 이동"할 최소 신뢰도 / 최소 의미 문자 수
-export const CAPTURE_MIN_CONFIDENCE = 55;
-export const CAPTURE_MIN_CHARS = 3;
+// 품질이 좋은(초록) 프레임에서만 OCR이 돌므로, 첫 인식에서 바로 넘어가도록 낮게.
+export const CAPTURE_MIN_CONFIDENCE = 45;
+export const CAPTURE_MIN_CHARS = 2;
 
 // 저사양 기기 추정: 논리 코어 수 / 메모리 기반
 export function detectLowEnd(): boolean {
