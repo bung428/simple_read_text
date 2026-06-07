@@ -11,9 +11,10 @@
     "lint": "tsc -b --noEmit"
   },
   "dependencies": {
+    "onnxruntime-web": "^1.26.0",
+    "ppu-paddle-ocr": "^5.8.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tesseract.js": "^5.1.1",
     "zustand": "^4.5.5"
   },
   "devDependencies": {

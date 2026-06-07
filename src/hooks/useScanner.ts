@@ -3,7 +3,7 @@ import { useAppStore } from "../store";
 import { QualityAnalyzer } from "../utils/quality";
 import { parseResult } from "../utils/parser";
 import { mapRoiToVideo } from "../utils/roi";
-import { CAPTURE_MIN_CHARS, OCR_LANG } from "../config";
+import { OCR_LANG } from "../config";
 import type { FeedbackKind, OcrWorkerResponse, QualityResult } from "../types";
 
 // 품질 체크용 다운스케일 폭 (작게 -> 빠르고 저전력)
@@ -24,8 +24,6 @@ export function useScanner(
   const qualityCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const roiCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const reqIdRef = useRef(0);
-  // 인식 실패 메시지를 잠깐 유지하기 위한 시각 (품질 루프가 즉시 덮어쓰지 않도록)
-  const failUntilRef = useRef(0);
   // 실제 캡처 구현체를 담아 안정적인 콜백으로 노출
   const captureImplRef = useRef<() => void>(() => {});
 
@@ -56,25 +54,17 @@ export function useScanner(
           }
           break;
         case "result": {
-          s.setProcessing(false);
+          // 이미 result 화면으로 이동한 상태. 인식 결과를 그 화면에 채운다.
+          // (빈 결과여도 라이브로 되돌리지 않고 리뷰 화면에서 안내)
           const { text, candidates } = parseResult(msg.text, msg.confidence);
-          const meaningfulChars = (text.match(/[0-9A-Za-z가-힣]/g) ?? []).length;
-          // 사용자가 직접 촬영했으므로, 의미 있는 글자가 잡히면 바로 결과화면으로
-          if (text && meaningfulChars >= CAPTURE_MIN_CHARS) {
-            s.setResult(text, candidates);
-            s.setFeedback("found");
-            s.setPhase("result");
-          } else {
-            // 인식 실패: 잠시 안내 후 다시 촬영 가능
-            failUntilRef.current = Date.now() + 1800;
-            s.setFeedback("fail");
-          }
+          s.setResult(text, candidates);
+          s.setProcessing(false);
           break;
         }
         case "error":
+          // 인식 실패도 리뷰 화면에서 "텍스트 없음"으로 처리
+          s.setResult("", []);
           s.setProcessing(false);
-          failUntilRef.current = Date.now() + 1800;
-          s.setFeedback("fail");
           console.warn("[OCR] error:", msg.message);
           break;
       }
@@ -107,7 +97,6 @@ export function useScanner(
         !roiEl ||
         s.phase !== "scanning" ||
         s.isProcessing ||
-        Date.now() < failUntilRef.current ||
         video.readyState < 2 ||
         video.videoWidth === 0
       ) {
@@ -154,10 +143,6 @@ export function useScanner(
       if (!rect) return;
       const { x: roiX, y: roiY, w: roiW, h: roiH } = rect;
 
-      s.setProcessing(true);
-      s.setFeedback("scanning");
-      failUntilRef.current = 0;
-
       const targetW = Math.min(s.profile.roiMaxWidth, roiW);
       const scale = targetW / roiW;
       const targetH = Math.max(1, Math.round(roiH * scale));
@@ -166,25 +151,35 @@ export function useScanner(
       rCanvas.width = targetW;
       rCanvas.height = targetH;
       const rCtx = rCanvas.getContext("2d");
-      if (!rCtx) {
-        s.setProcessing(false);
-        return;
-      }
+      if (!rCtx) return;
       rCtx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, targetW, targetH);
 
       const id = ++reqIdRef.current;
-      createImageBitmap(rCanvas)
-        .then((bitmap) => {
-          // 비트맵으로 복사 완료 → 캔버스(촬영 이미지) 즉시 비워 메모리 회수
-          rCanvas.width = 0;
-          rCanvas.height = 0;
-          // 비트맵은 worker로 transfer되며, worker가 OCR 직후 close()로 해제한다
-          worker.postMessage({ type: "recognize", id, bitmap }, [bitmap]);
-        })
-        .catch((err) => {
-          console.warn("[scanner] bitmap error", err);
-          useAppStore.getState().setProcessing(false);
-        });
+
+      // 1) 촬영 미리보기(blob) 생성 → 즉시 결과화면으로 이동(사진이 사라지지 않게)
+      rCanvas.toBlob(
+        (blob) => {
+          const st = useAppStore.getState();
+          st.setCapturedImage(blob ? URL.createObjectURL(blob) : null);
+          st.setResult("", []); // 이전 결과 비우고 인식 대기 상태로
+          st.setProcessing(true);
+          st.setPhase("result");
+
+          // 2) OCR용 비트맵 생성 → worker로 transfer (worker가 close로 해제)
+          createImageBitmap(rCanvas)
+            .then((bitmap) => {
+              worker.postMessage({ type: "recognize", id, bitmap }, [bitmap]);
+            })
+            .catch((err) => {
+              console.warn("[scanner] bitmap error", err);
+              const st2 = useAppStore.getState();
+              st2.setResult("", []);
+              st2.setProcessing(false);
+            });
+        },
+        "image/jpeg",
+        0.85
+      );
     };
     captureImplRef.current = doCapture;
 

@@ -29,6 +29,7 @@ interface AppState {
   recognizedText: string; // 읽어낸 전체 텍스트
   candidates: OcrCandidate[]; // 빠른 복사용 자동 감지 항목
   lastCopied: string | null;
+  capturedImageUrl: string | null; // 촬영한 이미지 미리보기 (ObjectURL)
 
   profile: PerfProfile;
   paused: boolean;
@@ -43,6 +44,7 @@ interface AppState {
   setFeedback: (f: FeedbackKind) => void;
   setResult: (text: string, candidates: OcrCandidate[]) => void;
   setCopied: (s: string) => void;
+  setCapturedImage: (url: string | null) => void;
   togglePause: () => void;
   reset: () => void;
 }
@@ -61,6 +63,7 @@ export const useAppStore = create<AppState>((set) => ({
   recognizedText: "",
   candidates: [],
   lastCopied: null,
+  capturedImageUrl: null,
 
   profile: detectLowEnd() ? LOW_END_PROFILE : DEFAULT_PROFILE,
   paused: false,
@@ -75,13 +78,26 @@ export const useAppStore = create<AppState>((set) => ({
   setResult: (recognizedText, candidates) =>
     set({ recognizedText, candidates }),
   setCopied: (lastCopied) => set({ lastCopied }),
+  setCapturedImage: (url) =>
+    set((s) => {
+      // 이전 이미지 URL은 메모리 해제
+      if (s.capturedImageUrl && s.capturedImageUrl !== url) {
+        URL.revokeObjectURL(s.capturedImageUrl);
+      }
+      return { capturedImageUrl: url };
+    }),
   togglePause: () => set((s) => ({ paused: !s.paused })),
   reset: () =>
-    set({
-      recognizedText: "",
-      candidates: [],
-      lastCopied: null,
-      feedback: "idle",
-      quality: null,
+    set((s) => {
+      // 화면을 떠날 때 촬영 이미지 해제 (메모리 회수)
+      if (s.capturedImageUrl) URL.revokeObjectURL(s.capturedImageUrl);
+      return {
+        recognizedText: "",
+        candidates: [],
+        lastCopied: null,
+        feedback: "idle",
+        quality: null,
+        capturedImageUrl: null,
+      };
     }),
 }));

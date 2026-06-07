@@ -49,12 +49,13 @@ export default defineConfig(({ command }) => {
           ],
         },
         workbox: {
-          // tesseract 관련 대용량 wasm/언어 파일까지 캐싱
-          maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
+          maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
           // index.html 은 precache 하지 않고 항상 네트워크 우선으로 받음
           // (배포 후 옛 HTML→옛 JS 로 묶이는 문제 방지)
-          globPatterns: ["**/*.{js,css,svg,png,ico,wasm}"],
-          globIgnores: ["**/index.html"],
+          // wasm 은 precache 제외: onnxruntime-web wasm(≈26MB)은 런타임에
+          // CDN(jsdelivr)에서 받아 runtimeCaching으로 캐싱한다.
+          globPatterns: ["**/*.{js,css,svg,png,ico}"],
+          globIgnores: ["**/index.html", "**/*.wasm"],
           navigateFallback: null,
           cleanupOutdatedCaches: true,
           runtimeCaching: [
@@ -69,15 +70,33 @@ export default defineConfig(({ command }) => {
               },
             },
             {
-              // tesseract 코어/언어 traineddata CDN 캐싱
-              urlPattern: /^https:\/\/.*\.(wasm|traineddata\.gz|traineddata)$/,
+              // onnxruntime-web wasm 바이너리 (jsdelivr CDN) 캐싱
+              urlPattern: ({ url }) =>
+                url.hostname === "cdn.jsdelivr.net" &&
+                url.pathname.includes("onnxruntime-web"),
               handler: "CacheFirst",
               options: {
-                cacheName: "tesseract-assets",
+                cacheName: "ort-wasm",
                 expiration: {
                   maxEntries: 20,
                   maxAgeSeconds: 60 * 60 * 24 * 30,
                 },
+              },
+            },
+            {
+              // PaddleOCR ONNX 모델 / 사전 (githubusercontent) 캐싱
+              urlPattern: ({ url }) =>
+                url.hostname.endsWith("githubusercontent.com") &&
+                /\.(onnx|ort|txt)$/.test(url.pathname),
+              handler: "CacheFirst",
+              options: {
+                cacheName: "paddle-models",
+                expiration: {
+                  maxEntries: 20,
+                  maxAgeSeconds: 60 * 60 * 24 * 30,
+                },
+                cacheableResponse: { statuses: [0, 200] },
+                rangeRequests: true,
               },
             },
           ],
